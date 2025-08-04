@@ -1,0 +1,27 @@
+[package]
+name = "shadow_chaser"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winit = "0.30"
+wgpu = "0.20"
+rapier2d = { version = "0.19", features = ["serde-serialize", "simd-stable"] }
+kira = "0.9"
+specs = { version = "0.20", features = ["serde"] }
+specs-derive = "0.4.1"
+
+# Utility for running async code in a sync context
+pollster = "0.3"
+
+# Logging crates
+log = "0.4"
+simple-logging = "2.0"
+
+# Concurrency crate needed by rapier for event handling
+crossbeam = "0.8"
+
+# Data manipulation for wgpu
+bytemuck = { version = "1.15", features = ["derive"] }
