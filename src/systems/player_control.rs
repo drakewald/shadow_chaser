@@ -5,6 +5,7 @@ use crate::{
 };
 use winit::keyboard::KeyCode;
 use rapier2d::prelude::*;
+use rapier2d::parry::query::ShapeCastOptions;
 use log;
 
 pub struct PlayerControlSystem;
@@ -23,33 +24,27 @@ impl<'a> System<'a> for PlayerControlSystem {
         let pw = &mut *physics_world;
 
         for (entity, _, body) in (&entities, &players, &bodies).join() {
+            let collider = pw.collider_set.get(body.collider_handle).unwrap();
+            let rigid_body = pw.rigid_body_set.get(body.rigid_body_handle).unwrap();
             
-            // --- Ground Detection (Corrected Method) ---
             let was_grounded = grounded_storage.get(entity).is_some();
-            let mut is_grounded = false;
+            let shape = collider.shape();
+            let shape_pos = rigid_body.position();
+            let shape_vel = vector![0.0, -0.1];
+            let filter = QueryFilter::default().exclude_rigid_body(body.rigid_body_handle);
 
-            // We iterate through all contact pairs involving the player's collider.
-            for contact_pair in pw.narrow_phase.contact_pairs_with(body.collider_handle) {
-                // The contact normal tells us the direction of the collision.
-                for manifold in &contact_pair.manifolds {
-                    // The normal points "out" of the surface. To check if we are on the ground,
-                    // we need to see if the contact normal on the player's body is pointing downwards.
-                    let normal = if contact_pair.collider1 == body.collider_handle {
-                        manifold.local_n1
-                    } else {
-                        manifold.local_n2
-                    };
+            let cast_options = ShapeCastOptions {
+                max_time_of_impact: 0.2,
+                target_distance: 0.0,
+                stop_at_penetration: true,
+                compute_impact_geometry_on_penetration: false,
+            };
 
-                    // A normal pointing down (a large negative Y value) means the contact is on the player's feet.
-                    if normal.y < -0.7 {
-                        is_grounded = true;
-                        break; // Found ground, no need to check other manifolds
-                    }
-                }
-                if is_grounded {
-                    break; // Found ground, no need to check other contact pairs
-                }
-            }
+            let hit = pw.query_pipeline.cast_shape(
+                &pw.rigid_body_set, &pw.collider_set, shape_pos, &shape_vel, shape, cast_options, filter
+            );
+            
+            let is_grounded = hit.is_some();
 
             if is_grounded {
                 if !was_grounded {
@@ -63,14 +58,12 @@ impl<'a> System<'a> for PlayerControlSystem {
                 grounded_storage.remove(entity);
             }
 
-            // --- Movement Control ---
             if let Some(rb) = pw.rigid_body_set.get_mut(body.rigid_body_handle) {
                 let move_speed = 500.0;
-                let jump_impulse = 400.0;
+                let jump_impulse = 500.0;
                 let current_vel = *rb.linvel();
                 let mut desired_vel = vector![0.0, current_vel.y];
 
-                // Horizontal movement
                 if input_state.pressed_keys.contains(&KeyCode::KeyA) || input_state.pressed_keys.contains(&KeyCode::ArrowLeft) {
                     desired_vel.x = -move_speed;
                 } else if input_state.pressed_keys.contains(&KeyCode::KeyD) || input_state.pressed_keys.contains(&KeyCode::ArrowRight) {
@@ -79,7 +72,6 @@ impl<'a> System<'a> for PlayerControlSystem {
                     desired_vel.x = 0.0;
                 }
 
-                // Jumping
                 if is_grounded && input_state.pressed_keys.contains(&KeyCode::Space) {
                     desired_vel.y = jump_impulse;
                     log::info!("Jump initiated! Setting Y velocity to {}", jump_impulse);

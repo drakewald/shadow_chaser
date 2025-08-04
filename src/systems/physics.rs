@@ -16,6 +16,7 @@ impl<'a> System<'a> for PhysicsSystem {
     fn run(&mut self, (mut physics_world, mut positions, bodies): Self::SystemData) {
         let pw = &mut *physics_world;
 
+        // UPDATED: Pass the query pipeline to the step function
         pw.physics_pipeline.step(
             &pw.gravity,
             &pw.integration_parameters,
@@ -27,12 +28,11 @@ impl<'a> System<'a> for PhysicsSystem {
             &mut pw.impulse_joint_set,
             &mut pw.multibody_joint_set,
             &mut pw.ccd_solver,
-            None,
+            Some(&mut pw.query_pipeline), // Pass the query pipeline here
             &pw.physics_hooks,
             &pw.event_handler,
         );
 
-        // Update our Position component from the physics world's state
         for (pos, body) in (&mut positions, &bodies).join() {
             if let Some(rigid_body) = pw.rigid_body_set.get(body.rigid_body_handle) {
                 let translation = rigid_body.translation();

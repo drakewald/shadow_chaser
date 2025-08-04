@@ -15,7 +15,8 @@ pub struct PhysicsWorld {
     pub impulse_joint_set: ImpulseJointSet,
     pub multibody_joint_set: MultibodyJointSet,
     pub ccd_solver: CCDSolver,
-    // pub query_pipeline: QueryPipeline, // REMOVED
+    // RE-ADDED: This is required for shape-casting.
+    pub query_pipeline: QueryPipeline,
     pub physics_hooks: (),
     pub event_handler: ChannelEventCollector,
     pub _collision_event_receiver: Receiver<CollisionEvent>,
@@ -24,7 +25,6 @@ pub struct PhysicsWorld {
 
 impl Default for PhysicsWorld {
     fn default() -> Self {
-        // CORRECTED: Restored the missing '=' sign
         let (collision_sender, collision_receiver) = unbounded();
         let (contact_force_sender, contact_force_receiver) = unbounded();
         let event_handler = ChannelEventCollector::new(collision_sender, contact_force_sender);
@@ -41,7 +41,7 @@ impl Default for PhysicsWorld {
             impulse_joint_set: ImpulseJointSet::new(),
             multibody_joint_set: MultibodyJointSet::new(),
             ccd_solver: CCDSolver::new(),
-            // query_pipeline: QueryPipeline::new(), // REMOVED
+            query_pipeline: QueryPipeline::new(), // RE-ADDED
             physics_hooks: (),
             event_handler,
             _collision_event_receiver: collision_receiver,
@@ -56,7 +56,7 @@ pub struct RenderData(pub Vec<Vertex>);
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    pub position: [f32; 3],
+    pub position: [f32; 2],
     pub color: [f32; 4],
 }
 
@@ -69,10 +69,10 @@ impl Vertex {
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x4,
                 },
@@ -84,4 +84,10 @@ impl Vertex {
 #[derive(Default)]
 pub struct InputState {
     pub pressed_keys: HashSet<KeyCode>,
+}
+
+#[derive(Default)]
+pub struct ScreenDimensions {
+    pub width: f32,
+    pub height: f32,
 }

@@ -1,6 +1,7 @@
-// A struct to match the Vertex format in Rust
+// REMOVED: The camera uniform is gone for this test.
+
 struct VertexInput {
-    @location(0) position: vec3<f32>,
+    @location(0) position: vec2<f32>, // UPDATED: Position is now 2D
     @location(1) color: vec4<f32>,
 };
 
@@ -12,9 +13,8 @@ struct VertexOutput {
 @vertex
 fn vs_main(model: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    // For now, we pass the position through directly.
-    // In the future, we'll use a camera/projection matrix here.
-    out.clip_position = vec4<f32>(model.position.x, model.position.y, model.position.z, 1.0);
+    // We pass the position directly through because it's already in clip-space.
+    out.clip_position = vec4<f32>(model.position, 0.0, 1.0);
     out.color = model.color;
     return out;
 }

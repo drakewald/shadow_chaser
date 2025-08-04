@@ -1,0 +1,129 @@
+Introduction
+
+This document outlines the major components and a suggested development path for creating Shadow Chaser, a 2D platformer game in Rust. The game's core mechanic will be a physics-based hookshot used for swinging and traversal.
+
+This plan is tailored to use a specific, powerful set of libraries: wgpu for rendering, rapier2d for physics, kira for audio, and specs for the Entity-Component-System (ECS) architecture. This approach gives you fine-grained control and a deep understanding of how modern games are built.
+Core Game Components
+
+A 2D platformer can be broken down into several key systems that work together. Here are the essential ones for Shadow Chaser:
+
+    Windowing and Graphics: You'll need a way to create a window, handle user input, and draw graphics to the screen using a graphics pipeline.
+
+    Game Loop: The heart of your game. It's a continuous loop that processes input, advances the physics simulation, updates the game state via systems, and renders the scene.
+
+    Rendering: This involves using wgpu to create a rendering pipeline to draw your game's visuals—the player, enemies, level geometry, and the individual links of the hookshot chain.
+
+    Input Handling: You need to capture keyboard and mouse input to aim and fire the hookshot, as well as to control the player's swing and retract/extend the hookshot chain.
+
+    Physics and Collision Detection: This system will use rapier2d to handle all physical interactions. This is critical for the hookshot mechanic:
+
+        Ray-Casting: To fire the hookshot and determine where it latches onto the environment.
+
+        Joints: rapier2d's joints will be the key to the swing. A RopeJoint or a series of RevoluteJoints will be used to create the chain, connecting the player to the anchor point and allowing for realistic swinging physics.
+
+        Dynamic Bodies: The player and chain links will be dynamic bodies influenced by gravity and forces, while level geometry will be static.
+
+    Game State Management: The specs ECS will be the backbone of your game's architecture. Game objects will be entities, their data will be components (e.g., position, physics handle, sprite), and the game's logic will be implemented in systems (e.g., a physics system, a rendering system, a hookshot control system).
+
+    Asset Management: You'll need a way to load and manage assets like images for textures and sounds for audio playback.
+
+    Audio: kira will manage sound effects (hookshot firing, latching, chain movement) and music.
+
+Recommended Libraries (Crates)
+
+This project will be built by composing these powerful, focused libraries:
+
+    For Windowing and Input: winit
+
+    For 2D Graphics/Rendering: wgpu
+
+    For Physics: rapier2d (Its joint and ray-casting features are essential for the hookshot)
+
+    For Audio: kira
+
+    For ECS: specs
+
+Proposed Project Structure
+
+A good project structure will help keep your code organized as it grows. Here's a possible layout:
+
+shadow_chaser/
+├── Cargo.toml
+├── assets/
+│   ├── images/
+│   │   ├── player.png
+│   │   ├── hook.png
+│   │   ├── chain_link.png
+│   │   └── tiles/
+│   │       └── wall.png
+│   └── sounds/
+│       ├── hook_fire.wav
+│       ├── hook_latch.wav
+│       └── music.ogg
+└── src/
+    ├── main.rs         // Entry point, sets up ECS World, runs the dispatcher
+    ├── components.rs   // Defines all ECS components
+    ├── systems/        // Folder for all ECS systems
+    │   ├── player_control.rs
+    │   ├── physics.rs
+    │   ├── rendering.rs
+    │   └── hookshot.rs   // System for all hookshot logic
+    └── resources.rs    // Defines all ECS resources (e.g., physics world, audio manager)
+
+Development Roadmap
+
+Here's a step-by-step plan to build your game with the hookshot mechanic at its core.
+
+Milestone 1: The Foundation (This remains the same)
+
+    Setup Project & Dependencies: Create a new Rust project and add winit, wgpu, rapier2d, kira, and specs to your Cargo.toml.
+
+    Create a Window: Use winit to open a basic window.
+
+    Setup wgpu Pipeline: Initialize wgpu and set up a basic rendering pipeline that can clear the screen to a solid color.
+
+    Setup specs World: Create a World and register your first components and resources.
+
+    Basic Game Loop: Implement a game loop that runs the specs Dispatcher and handles window events.
+
+Milestone 2: The Player & Hookshot Firing
+
+    Setup rapier2d: Initialize the rapier2d physics world, including gravity, and store it as a specs resource.
+
+    Create Player Entity: Create an entity for the player with components for position and a handle to a rapier2d dynamic rigid body.
+
+    Render the Player: Create a rendering system that reads the player's position and draws a colored quad at that location using wgpu.
+
+    Hookshot Input & Ray-Casting: Create an input system that detects a mouse click. In a hookshot.rs system, use rapier2d's ray-casting to project a line from the player in the direction of the mouse. Detect if it hits a static physics body.
+
+Milestone 3: The Swing Mechanic
+
+    Create the Joint: When the raycast hits a wall, use the hookshot system to create a rapier2d joint (e.g., a RopeJoint) between the player's rigid body and the point of impact. This creates the pivot for the swing.
+
+    Model the Chain: Create entities for each chain link, each with its own small rigid body. Connect them sequentially between the player and the anchor point using RevoluteJoints.
+
+    Chain Control: Update the input and hookshot systems to allow the player to shorten or lengthen the main RopeJoint, pulling them towards or letting them out from the anchor point.
+
+    Render the Hookshot: Update the rendering system to draw a sprite for the hook itself and for each individual chain link entity.
+
+Milestone 4: Sprites, Audio, and Polish
+
+    Texture Loading: Use a crate like image to load PNGs for the player, hook, and chain links, and create wgpu textures.
+
+    Render Sprites: Update your rendering system to draw textured sprites instead of solid-colored quads.
+
+    Setup kira: Initialize the kira audio manager and store it as a resource.
+
+    Audio System: Create a system to play sounds for firing the hook, it latching onto a surface, and the chain retracting/extending.
+
+Milestone 5: Gameplay and Level Design
+
+    Level Design: Start designing levels specifically for the hookshot. This means creating varied ceiling heights, anchor points, and obstacles that require skillful swinging to navigate.
+
+    Enemies: Add enemy entities with simple AI.
+
+    Goals and Win/Loss Conditions: Use specs resources to track game state and add systems to check for win/loss conditions.
+
+    Camera: Create a camera system that smoothly follows the player's swinging movements.
+
+This revised plan puts your unique hookshot mechanic at the center of development. It's an ambitious and exciting project! Let me know when you're ready to start on Milestone 1.

@@ -1,7 +1,7 @@
 // src/main.rs
 
 use std::iter;
-use std::time::Instant; // NEW: For tracking time
+use std::time::Instant;
 use winit::{
     application::ApplicationHandler,
     event::{WindowEvent, ElementState},
@@ -9,7 +9,7 @@ use winit::{
     keyboard::PhysicalKey,
     window::Window,
 };
-use specs::{World, WorldExt, Builder, Dispatcher, DispatcherBuilder, Join};
+use specs::{World, WorldExt, Builder, Dispatcher, DispatcherBuilder};
 use rapier2d::prelude::*;
 use rapier2d::na::Vector2;
 use log;
@@ -20,7 +20,7 @@ mod systems;
 
 use components::*;
 use resources::*;
-use systems::{physics::PhysicsSystem, player_control::PlayerControlSystem};
+use systems::{physics::PhysicsSystem, player_control::PlayerControlSystem, rendering::RenderingSystem};
 
 #[derive(Default)]
 struct App<'a> {
@@ -38,11 +38,9 @@ struct State<'a> {
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
     
-    // ECS Stuff
     ecs_world: World,
     dispatcher: Dispatcher<'a, 'a>,
 
-    // NEW: For fixed timestep
     last_update: Instant,
     accumulator: f32,
 }
@@ -54,33 +52,17 @@ impl<'a> State<'a> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window).unwrap();
         let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
             .unwrap();
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await
             .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
+        let surface_format = surface_caps.formats[0];
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -94,6 +76,7 @@ impl<'a> State<'a> {
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -144,47 +127,17 @@ impl<'a> State<'a> {
         ecs_world.insert(PhysicsWorld::default());
         ecs_world.insert(RenderData::default());
         ecs_world.insert(InputState::default());
+        ecs_world.insert(ScreenDimensions { width: size.width as f32, height: size.height as f32 });
 
         let dispatcher = DispatcherBuilder::new()
             .with(PlayerControlSystem, "player_control", &[])
             .with(PhysicsSystem, "physics_system", &["player_control"])
+            .with(RenderingSystem, "rendering_system", &["physics_system"])
             .build();
 
         // --- Create Entities ---
-        let (ground_rb_handle, ground_col_handle, player_rb_handle, player_col_handle) = {
-            let mut pw_resource = ecs_world.write_resource::<PhysicsWorld>();
-            let pw = &mut *pw_resource;
-            let rigid_body_set = &mut pw.rigid_body_set;
-            let collider_set = &mut pw.collider_set;
-
-            let ground_body = RigidBodyBuilder::fixed().translation(vector![0.0, -250.0]).build();
-            let ground_collider = ColliderBuilder::cuboid(500.0, 10.0).build();
-            let ground_rb_handle = rigid_body_set.insert(ground_body);
-            let ground_col_handle = collider_set.insert_with_parent(ground_collider, ground_rb_handle, rigid_body_set);
-
-            let player_body = RigidBodyBuilder::dynamic()
-                .translation(vector![0.0, 100.0])
-                .lock_rotations()
-                .build();
-            let player_collider = ColliderBuilder::cuboid(10.0, 20.0).build();
-            let player_rb_handle = rigid_body_set.insert(player_body);
-            let player_col_handle = collider_set.insert_with_parent(player_collider, player_rb_handle, rigid_body_set);
-            
-            (ground_rb_handle, ground_col_handle, player_rb_handle, player_col_handle)
-        }; 
-
-        ecs_world.create_entity()
-            .with(Position(Vector2::new(0.0, -250.0)))
-            .with(Renderable { color: [0.2, 0.2, 0.2, 1.0], width: 1000.0, height: 20.0 })
-            .with(PhysicsBody { rigid_body_handle: ground_rb_handle, collider_handle: ground_col_handle })
-            .build();
-
-        ecs_world.create_entity()
-            .with(Position(Vector2::new(0.0, 100.0)))
-            .with(Renderable { color: [1.0, 0.5, 0.0, 1.0], width: 20.0, height: 40.0 })
-            .with(PhysicsBody { rigid_body_handle: player_rb_handle, collider_handle: player_col_handle })
-            .with(Player)
-            .build();
+        create_level(&mut ecs_world);
+        create_player(&mut ecs_world, 0.0, 100.0);
 
         Self {
             window,
@@ -209,6 +162,9 @@ impl<'a> State<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            let mut screen_dim = self.ecs_world.write_resource::<ScreenDimensions>();
+            screen_dim.width = new_size.width as f32;
+            screen_dim.height = new_size.height as f32;
         }
     }
 
@@ -243,7 +199,6 @@ impl<'a> State<'a> {
     }
 
     fn update(&mut self) {
-        // --- FIXED TIMESTEP LOGIC ---
         let dt = self.ecs_world.read_resource::<PhysicsWorld>().integration_parameters.dt;
         let now = Instant::now();
         self.accumulator += now.duration_since(self.last_update).as_secs_f32();
@@ -255,33 +210,7 @@ impl<'a> State<'a> {
             self.accumulator -= dt;
         }
         
-        // --- RENDER DATA PREPARATION (runs once per frame) ---
-        let mut render_data = self.ecs_world.write_resource::<RenderData>();
-        render_data.0.clear();
-        let positions = self.ecs_world.read_storage::<Position>();
-        let renderables = self.ecs_world.read_storage::<Renderable>();
-
-        for (pos, render) in (&positions, &renderables).join() {
-            let half_w = render.width / self.size.width as f32;
-            let half_h = render.height / self.size.height as f32;
-            let center_x = (pos.0.x / self.size.width as f32) * 2.0;
-            let center_y = (pos.0.y / self.size.height as f32) * 2.0;
-
-            let x_min = center_x - half_w;
-            let x_max = center_x + half_w;
-            let y_min = center_y - half_h;
-            let y_max = center_y + half_h;
-
-            let vertices = [
-                Vertex { position: [x_min, y_min, 0.0], color: render.color },
-                Vertex { position: [x_max, y_min, 0.0], color: render.color },
-                Vertex { position: [x_max, y_max, 0.0], color: render.color },
-                Vertex { position: [x_min, y_min, 0.0], color: render.color },
-                Vertex { position: [x_max, y_max, 0.0], color: render.color },
-                Vertex { position: [x_min, y_max, 0.0], color: render.color },
-            ];
-            render_data.0.extend_from_slice(&vertices);
-        }
+        let render_data = self.ecs_world.read_resource::<RenderData>();
         self.num_vertices = render_data.0.len() as u32;
         self.queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&render_data.0));
     }
@@ -289,9 +218,7 @@ impl<'a> State<'a> {
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -322,10 +249,66 @@ impl<'a> State<'a> {
     }
 }
 
+fn create_wall(world: &mut World, x: f32, y: f32, width: f32, height: f32) {
+    let (rb_handle, col_handle) = {
+        let mut pw = world.write_resource::<PhysicsWorld>();
+        let pw = &mut *pw;
+        let rigid_body_set = &mut pw.rigid_body_set;
+        let collider_set = &mut pw.collider_set;
+
+        let rigid_body = RigidBodyBuilder::fixed().translation(vector![x, y]).build();
+        let collider = ColliderBuilder::cuboid(width / 2.0, height / 2.0).build();
+        let rb_handle = rigid_body_set.insert(rigid_body);
+        let col_handle = collider_set.insert_with_parent(collider, rb_handle, rigid_body_set);
+        (rb_handle, col_handle)
+    };
+    
+    world.create_entity()
+        .with(Position(Vector2::new(x, y)))
+        .with(Renderable { color: [0.2, 0.2, 0.2, 1.0], width, height })
+        .with(PhysicsBody { rigid_body_handle: rb_handle, collider_handle: col_handle })
+        .build();
+}
+
+// UPDATED: Added a vertical wall to your level layout
+fn create_level(world: &mut World) {
+    create_wall(world, 0.0, -250.0, 500.0, 20.0);
+    create_wall(world, 200.0, -150.0, 200.0, 20.0);
+    create_wall(world, -200.0, 0.0, 200.0, 20.0);
+    // NEW: A vertical wall
+    create_wall(world, -200.0, -150.0, 20.0, 200.0);
+}
+
+fn create_player(world: &mut World, x: f32, y: f32) {
+    let (rb_handle, col_handle) = {
+        let mut pw = world.write_resource::<PhysicsWorld>();
+        let pw = &mut *pw;
+        let rigid_body_set = &mut pw.rigid_body_set;
+        let collider_set = &mut pw.collider_set;
+
+        let rigid_body = RigidBodyBuilder::dynamic()
+            .translation(vector![x, y])
+            .lock_rotations()
+            .build();
+        let collider = ColliderBuilder::cuboid(10.0, 20.0).build();
+        let rb_handle = rigid_body_set.insert(rigid_body);
+        let col_handle = collider_set.insert_with_parent(collider, rb_handle, rigid_body_set);
+        (rb_handle, col_handle)
+    };
+
+    world.create_entity()
+        .with(Position(Vector2::new(x, y)))
+        .with(Renderable { color: [1.0, 0.5, 0.0, 1.0], width: 20.0, height: 40.0 })
+        .with(PhysicsBody { rigid_body_handle: rb_handle, collider_handle: col_handle })
+        .with(Player)
+        .build();
+}
+
+
 impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attributes = Window::default_attributes()
-            .with_title("Shadow Chaser - Milestone 2");
+            .with_title("Shadow Chaser");
         let window = Box::leak(Box::new(event_loop.create_window(attributes).unwrap()));
         self.state = Some(pollster::block_on(State::new(window)));
     }
