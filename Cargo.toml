@@ -1,3 +1,5 @@
+# Cargo.toml
+
 [package]
 name = "shadow_chaser"
 version = "0.1.0"

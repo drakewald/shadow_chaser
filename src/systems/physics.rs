@@ -1,3 +1,5 @@
+// src/systems/physics.rs
+
 use specs::{System, Write, WriteStorage, ReadStorage, Join};
 use crate::{
     resources::PhysicsWorld,
@@ -16,7 +18,7 @@ impl<'a> System<'a> for PhysicsSystem {
     fn run(&mut self, (mut physics_world, mut positions, bodies): Self::SystemData) {
         let pw = &mut *physics_world;
 
-        // UPDATED: Pass the query pipeline to the step function
+        // Step the physics simulation forward one tick.
         pw.physics_pipeline.step(
             &pw.gravity,
             &pw.integration_parameters,
@@ -28,11 +30,19 @@ impl<'a> System<'a> for PhysicsSystem {
             &mut pw.impulse_joint_set,
             &mut pw.multibody_joint_set,
             &mut pw.ccd_solver,
-            Some(&mut pw.query_pipeline), // Pass the query pipeline here
+            None, 
             &pw.physics_hooks,
             &pw.event_handler,
         );
 
+        // **CRITICAL ADDITION**
+        // Update the query pipeline to be aware of the new positions of all bodies.
+        // This MUST happen before the player controller tries to use it.
+        pw.query_pipeline.update(&pw.rigid_body_set, &pw.collider_set);
+
+
+        // After the simulation step, update the Position component of each entity
+        // to match its new physical location.
         for (pos, body) in (&mut positions, &bodies).join() {
             if let Some(rigid_body) = pw.rigid_body_set.get(body.rigid_body_handle) {
                 let translation = rigid_body.translation();

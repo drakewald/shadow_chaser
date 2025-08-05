@@ -6,12 +6,15 @@ use winit::{
     application::ApplicationHandler,
     event::{WindowEvent, ElementState},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::KeyCode,
     keyboard::PhysicalKey,
     window::Window,
 };
-use specs::{World, WorldExt, Builder, Dispatcher, DispatcherBuilder};
+use specs::{World, WorldExt, Builder, Dispatcher, DispatcherBuilder, System, Write};
 use rapier2d::prelude::*;
 use rapier2d::na::Vector2;
+// **FIXED: ADDED THE MISSING IMPORT**
+use rapier2d::control::KinematicCharacterController;
 use log;
 
 mod components;
@@ -21,6 +24,16 @@ mod systems;
 use components::*;
 use resources::*;
 use systems::{physics::PhysicsSystem, player_control::PlayerControlSystem, rendering::RenderingSystem};
+
+// A simple system to reset single-frame input flags
+pub struct InputResetSystem;
+impl<'a> System<'a> for InputResetSystem {
+    type SystemData = Write<'a, InputState>;
+    fn run(&mut self, mut input_state: Self::SystemData) {
+        input_state.jump_pressed = false;
+    }
+}
+
 
 #[derive(Default)]
 struct App<'a> {
@@ -123,6 +136,8 @@ impl<'a> State<'a> {
         ecs_world.register::<PhysicsBody>();
         ecs_world.register::<Player>();
         ecs_world.register::<Grounded>();
+        ecs_world.register::<CharacterController>();
+
 
         ecs_world.insert(PhysicsWorld::default());
         ecs_world.insert(RenderData::default());
@@ -133,6 +148,7 @@ impl<'a> State<'a> {
             .with(PlayerControlSystem, "player_control", &[])
             .with(PhysicsSystem, "physics_system", &["player_control"])
             .with(RenderingSystem, "rendering_system", &["physics_system"])
+            .with_thread_local(InputResetSystem) 
             .build();
 
         // --- Create Entities ---
@@ -182,14 +198,12 @@ impl<'a> State<'a> {
                 let mut input_state = self.ecs_world.write_resource::<InputState>();
                 match state {
                     ElementState::Pressed => {
-                        if input_state.pressed_keys.insert(*keycode) {
-                            log::info!("Key Pressed: {:?}", keycode);
+                        if input_state.pressed_keys.insert(*keycode) && *keycode == KeyCode::Space {
+                            input_state.jump_pressed = true;
                         }
                     }
                     ElementState::Released => {
-                        if input_state.pressed_keys.remove(keycode) {
-                            log::info!("Key Released: {:?}", keycode);
-                        }
+                        input_state.pressed_keys.remove(keycode);
                     }
                 }
                 true
@@ -270,12 +284,10 @@ fn create_wall(world: &mut World, x: f32, y: f32, width: f32, height: f32) {
         .build();
 }
 
-// UPDATED: Added a vertical wall to your level layout
 fn create_level(world: &mut World) {
     create_wall(world, 0.0, -250.0, 500.0, 20.0);
     create_wall(world, 200.0, -150.0, 200.0, 20.0);
     create_wall(world, -200.0, 0.0, 200.0, 20.0);
-    // NEW: A vertical wall
     create_wall(world, -200.0, -150.0, 20.0, 200.0);
 }
 
@@ -286,14 +298,21 @@ fn create_player(world: &mut World, x: f32, y: f32) {
         let rigid_body_set = &mut pw.rigid_body_set;
         let collider_set = &mut pw.collider_set;
 
-        let rigid_body = RigidBodyBuilder::dynamic()
+        let rigid_body = RigidBodyBuilder::kinematic_position_based()
             .translation(vector![x, y])
-            .lock_rotations()
             .build();
-        let collider = ColliderBuilder::cuboid(10.0, 20.0).build();
+        
+        let collider = ColliderBuilder::capsule_y(10.0, 10.0)
+            .build();
+        
         let rb_handle = rigid_body_set.insert(rigid_body);
         let col_handle = collider_set.insert_with_parent(collider, rb_handle, rigid_body_set);
         (rb_handle, col_handle)
+    };
+
+    let character_controller = CharacterController {
+        controller: KinematicCharacterController::default(),
+        velocity: Vector2::zeros(),
     };
 
     world.create_entity()
@@ -301,6 +320,7 @@ fn create_player(world: &mut World, x: f32, y: f32) {
         .with(Renderable { color: [1.0, 0.5, 0.0, 1.0], width: 20.0, height: 40.0 })
         .with(PhysicsBody { rigid_body_handle: rb_handle, collider_handle: col_handle })
         .with(Player)
+        .with(character_controller)
         .build();
 }
 
@@ -322,7 +342,7 @@ impl ApplicationHandler for App<'_> {
                         state.resize(physical_size);
                     }
                     WindowEvent::RedrawRequested => {
-                        state.update();
+                         state.update();
                         match state.render() {
                             Ok(_) => {}
                             Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
